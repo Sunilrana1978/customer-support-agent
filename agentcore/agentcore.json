@@ -1,0 +1,29 @@
+{
+  "projectName": "customer-support-agent",
+  "agents": [
+    {
+      "name": "CustomerSupportAgent",
+      "displayName": "Customer Support Agent",
+      "description": "AI-powered e-commerce customer support agent with memory, gateway tools, and observability",
+      "language": "Python",
+      "framework": "Strands",
+      "modelProvider": "Bedrock",
+      "protocol": "HTTP",
+      "buildType": "CodeZip"
+    }
+  ],
+  "memories": [
+    {
+      "name": "CustomerSupportMemory",
+      "strategies": ["SEMANTIC"]
+    }
+  ],
+  "gateways": [
+    {
+      "name": "CustomerSupportGateway",
+      "authorizerType": "NONE",
+      "semanticSearch": true,
+      "runtimes": ["CustomerSupportAgent"]
+    }
+  ]
+}

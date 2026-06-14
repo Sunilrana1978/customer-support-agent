@@ -1,0 +1,8 @@
+{
+  "targets": [
+    {
+      "awsAccount": "REPLACE_WITH_YOUR_ACCOUNT_ID",
+      "awsRegion": "us-west-2"
+    }
+  ]
+}

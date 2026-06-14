@@ -1,0 +1,14 @@
+[project]
+name = "customer-support-agent"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "bedrock-agentcore>=1.0.0",
+    "strands-agents>=1.0.1",
+    "boto3>=1.39.9",
+    "mcp>=1.9.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

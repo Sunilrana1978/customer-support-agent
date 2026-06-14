@@ -1,0 +1,23 @@
+{
+  "tools": [
+    {
+      "name": "web_search",
+      "description": "Search the web for current information, product reviews, news, or any query. Uses DuckDuckGo — no API key required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query string to look up on the web"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum number of results to return (default: 5, max: 10)",
+            "default": 5
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  ]
+}

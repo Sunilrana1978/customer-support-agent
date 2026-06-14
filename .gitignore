@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+.env
+.venv/
+venv/
+*.zip
+lambda_build/
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+# AgentCore CLI
+agentcore/.env.local
+agentcore/.cdk.staging/
+agentcore/cdk.out/
+.agentcore/
+
+# CDK
+cdk.out/
+node_modules/
+
+# Streamlit
+.streamlit/secrets.toml
