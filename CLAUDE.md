@@ -26,7 +26,7 @@ pip install -e "app/CustomerSupportAgent"
 # Packages all artifacts, uploads to S3, deploys the CFN stack
 bash scripts/package_and_deploy_cfn.sh
 
-# Update the stack after code changes (re-run the same script)
+# Update the stack after code changes (re-run the same script; idempotent)
 bash scripts/package_and_deploy_cfn.sh
 
 # Tear down
@@ -80,7 +80,7 @@ User → Streamlit (streamlit_app/app.py)
 
 `agentcore/agentcore.json` declares the Runtime, Memory, and Gateway. `agentcore/aws-targets.json` sets the AWS account and region (`us-west-2`). After `agentcore deploy`, the CLI provisions everything via CDK and injects environment variables into the Runtime automatically.
 
-Lambda `tools.json` files (e.g. `lambda/web_search/tools.json`) are the MCP tool schemas registered with the Gateway via `agentcore add gateway-target --tool-schema-file`.
+Lambda `tools.json` files (e.g. `lambda/web_search/tools.json`) are the MCP tool schemas registered with the Gateway via `agentcore add gateway-target --tool-schema-file`. In the CFN path, these schemas are inlined directly in `infrastructure/cloudformation.yaml`.
 
 ## Key Design Decisions
 
@@ -88,3 +88,43 @@ Lambda `tools.json` files (e.g. `lambda/web_search/tools.json`) are the MCP tool
 - **Model override**: Pass `"model_id"` in the invoke payload to use a different Bedrock model per request.
 - **Lambda packaging**: `infrastructure/deploy_lambdas.py` installs deps into a temp dir and zips for `python3.12` (x86_64). The `duckduckgo-search` dep is needed only for `web_search`; `check_warranty` uses stdlib only.
 - **Tool responses never raise**: Lambda handlers and direct tools return `{"error": "..."}` dicts on failure instead of raising exceptions.
+
+## CloudFormation Deployment Pitfalls
+
+These constraints are not obvious from the CFN docs and caused real failures:
+
+### Resource name patterns
+`AWS::BedrockAgentCore::Runtime` (`AgentRuntimeName`) and `AWS::BedrockAgentCore::RuntimeEndpoint` (`Name`) enforce `^[a-zA-Z][a-zA-Z0-9_]{0,47}$` — **no hyphens, 48 chars max**. Use underscores instead of hyphens (e.g. `CustomerSupportAgent_prod`).
+
+`AWS::BedrockAgentCore::Gateway` and `AWS::BedrockAgentCore::GatewayTarget` (`Name`) use `^([0-9a-zA-Z][-]?){1,100}$` — hyphens are allowed.
+
+`AWS::BedrockAgentCore::Memory` (`Name`) also uses `^[a-zA-Z][a-zA-Z0-9_]{0,47}$` — no hyphens.
+
+### GatewayTarget requires CredentialProviderConfigurations
+Lambda-backed `AWS::BedrockAgentCore::GatewayTarget` resources **always require** `CredentialProviderConfigurations`, even when the Gateway has `AuthorizerType: NONE`. Use `GATEWAY_IAM_ROLE` so the Gateway uses its IAM role to invoke the Lambda:
+```yaml
+CredentialProviderConfigurations:
+  - CredentialProviderType: GATEWAY_IAM_ROLE
+```
+
+### Agent artifact must not contain .pyc files
+`AWS::BedrockAgentCore::Runtime` rejects zips containing Python bytecode cache files (`.pyc`/`__pycache__`). The packaging script uses `pip install --no-compile` and `zip --exclude "*.pyc"` to prevent this.
+
+### S3Location uses `Prefix`, not `Key`
+In `AWS::BedrockAgentCore::Runtime`, the `AgentRuntimeArtifact.CodeConfiguration.Code.S3` field uses `Prefix` for the object key (not the more common `Key` name).
+
+### Debugging CFN failures
+Early validation failures (before resource creation) show as `AWS::EarlyValidation::PropertyValidation`. Dig into them with:
+```bash
+aws cloudformation describe-change-set-hooks \
+  --stack-name shopeasy-customer-support-agent \
+  --change-set-name <name>
+```
+Runtime creation failures surface via:
+```bash
+aws cloudformation describe-stack-events \
+  --stack-name shopeasy-customer-support-agent \
+  --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId,ResourceStatusReason]' \
+  --output json
+```
+A stack stuck in `REVIEW_IN_PROGRESS` (failed changeset, no resources created) must be deleted before redeploying: `aws cloudformation delete-stack --stack-name shopeasy-customer-support-agent && aws cloudformation wait stack-delete-complete --stack-name shopeasy-customer-support-agent`.
