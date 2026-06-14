@@ -33,7 +33,7 @@ Parameters:
 
   ModelId:
     Type: String
-    Default: us.anthropic.claude-sonnet-4-20250514-v1:0
+    Default: us.amazon.nova-lite-v1:0
     Description: Bedrock model ID used by the Strands agent at runtime.
 
   Environment:
@@ -113,16 +113,10 @@ Resources:
                 Resource: '*'
               - Effect: Allow
                 Action:
-                  - bedrock-agentcore:InvokeMemory
-                  - bedrock-agentcore:GetMemory
-                  - bedrock-agentcore:CreateMemoryEvent
-                  - bedrock-agentcore:ListMemoryEvents
-                  - bedrock-agentcore:RetrieveMemoryRecords
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - bedrock-agentcore:InvokeGateway
-                Resource: '*'
+                  - bedrock-agentcore:*
+                Resource:
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/*
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup

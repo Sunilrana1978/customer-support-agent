@@ -84,6 +84,9 @@ pip install \
     }
 
 # Zip the agent package (exclude Python cache to avoid runtime incompatibility)
+# Use a timestamped key so CloudFormation always detects code changes
+DEPLOY_TS=$(date -u +%Y%m%dT%H%M%S)
+AGENT_CODE_KEY="agent/deployment-${DEPLOY_TS}.zip"
 AGENT_ZIP="$(pwd)/.build/agent_deployment.zip"
 mkdir -p "$(pwd)/.build"
 # Remove all bytecode cache — use zip exclusion as belt-and-suspenders
@@ -94,9 +97,9 @@ mkdir -p "$(pwd)/.build"
     -q)
 echo "  Agent zip: $AGENT_ZIP ($(du -sh "$AGENT_ZIP" | cut -f1))"
 
-# Upload
-aws s3 cp "$AGENT_ZIP" "s3://$ARTIFACT_BUCKET/agent/deployment.zip" --quiet
-echo "  Uploaded: s3://$ARTIFACT_BUCKET/agent/deployment.zip"
+# Upload with versioned key
+aws s3 cp "$AGENT_ZIP" "s3://$ARTIFACT_BUCKET/$AGENT_CODE_KEY" --quiet
+echo "  Uploaded: s3://$ARTIFACT_BUCKET/$AGENT_CODE_KEY"
 echo
 
 # ── Step 3: Package Lambda functions (x86_64) ────────────
@@ -150,9 +153,10 @@ aws cloudformation deploy \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameter-overrides \
         ArtifactBucket="$ARTIFACT_BUCKET" \
-        AgentCodeKey="agent/deployment.zip" \
+        AgentCodeKey="$AGENT_CODE_KEY" \
         WebSearchLambdaKey="lambda/web_search.zip" \
         CheckWarrantyLambdaKey="lambda/check_warranty.zip" \
+        ModelId="us.amazon.nova-lite-v1:0" \
         Environment="$ENVIRONMENT" \
     --tags \
         Project=ShopEasySupport \

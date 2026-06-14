@@ -26,7 +26,7 @@ app = BedrockAgentCoreApp()
 
 GATEWAY_URL = os.environ.get("AGENTCORE_GATEWAY_URL", "")
 AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
-MODEL_ID = os.environ.get("MODEL_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0")
+MODEL_ID = os.environ.get("MODEL_ID", "us.amazon.nova-lite-v1:0")
 
 SYSTEM_PROMPT = """You are a helpful customer support agent for ShopEasy, an e-commerce platform.
 
@@ -70,7 +70,8 @@ def invoke(payload: dict, context) -> dict:
         from strands.tools.mcp.mcp_client import MCPClient
         from mcp.client.streamable_http import streamablehttp_client
 
-        mcp_client = MCPClient(lambda: streamablehttp_client(GATEWAY_URL))
+        mcp_url = GATEWAY_URL.rstrip("/") + "/mcp"
+        mcp_client = MCPClient(lambda: streamablehttp_client(mcp_url))
         with mcp_client:
             gateway_tools = list(mcp_client.list_tools_sync())
             agent = Agent(
