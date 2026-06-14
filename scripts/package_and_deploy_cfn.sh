@@ -49,7 +49,7 @@ fi
 echo
 
 # ── Step 2: Package agent code (ARM64 for AgentCore Runtime) ─
-echo "Step 2/5  Packaging agent code (ARM64 / Graviton)..."
+echo "Step 2/4  Packaging agent code (ARM64 / Graviton)..."
 AGENT_BUILD_DIR=$(mktemp -d)
 trap 'rm -rf "$AGENT_BUILD_DIR"' EXIT
 
@@ -93,21 +93,23 @@ echo "  Uploaded: s3://$ARTIFACT_BUCKET/agent/deployment.zip"
 echo
 
 # ── Step 3: Package Lambda functions (x86_64) ────────────
-echo "Step 3/5  Packaging Lambda functions..."
+echo "Step 3/4  Packaging Lambda functions..."
 
 package_lambda() {
     local name="$1"
     local source_dir="$2"
     local s3_key="$3"
+    local project_root="$4"
 
     local build_dir
     build_dir=$(mktemp -d)
+    local zip_abs="${project_root}/.build/${name}.zip"
 
     # Copy handler
-    cp "$source_dir/handler.py" "$build_dir/"
+    cp "${project_root}/${source_dir}/handler.py" "$build_dir/"
 
-    # Install dependencies if any
-    local req="$source_dir/requirements.txt"
+    # Install dependencies if any (non-comment, non-blank lines)
+    local req="${project_root}/${source_dir}/requirements.txt"
     if [[ -f "$req" ]]; then
         local content
         content=$(grep -v '^\s*#' "$req" | grep -v '^\s*$' || true)
@@ -116,31 +118,22 @@ package_lambda() {
         fi
     fi
 
-    local zip_path=".build/${name}.zip"
-    (cd "$build_dir" && zip -r "$(pwd)/../../$zip_path" . -q 2>/dev/null || \
-     cd "$build_dir" && zip -r "$(realpath "../../$zip_path")" . -q)
-    zip_path=".build/${name}.zip"
+    (cd "$build_dir" && zip -r "$zip_abs" . -q)
 
-    aws s3 cp "$zip_path" "s3://$ARTIFACT_BUCKET/$s3_key" --quiet
-    echo "  $name → s3://$ARTIFACT_BUCKET/$s3_key ($(du -sh "$zip_path" | cut -f1))"
+    aws s3 cp "$zip_abs" "s3://$ARTIFACT_BUCKET/$s3_key" --quiet
+    echo "  $name → s3://$ARTIFACT_BUCKET/$s3_key ($(du -sh "$zip_abs" | cut -f1))"
     rm -rf "$build_dir"
 }
 
+PROJECT_ROOT="$(pwd)"
 mkdir -p .build
-package_lambda "web_search"     "lambda/web_search"     "lambda/web_search.zip"
-package_lambda "check_warranty" "lambda/check_warranty" "lambda/check_warranty.zip"
+package_lambda "web_search"     "lambda/web_search"     "lambda/web_search.zip"     "$PROJECT_ROOT"
+package_lambda "check_warranty" "lambda/check_warranty" "lambda/check_warranty.zip" "$PROJECT_ROOT"
 echo
 
-# ── Step 4: Upload tool schemas ───────────────────────────
-echo "Step 4/5  Uploading MCP tool schemas..."
-aws s3 cp lambda/web_search/tools.json    "s3://$ARTIFACT_BUCKET/schemas/web_search_tools.json"    --quiet
-aws s3 cp lambda/check_warranty/tools.json "s3://$ARTIFACT_BUCKET/schemas/check_warranty_tools.json" --quiet
-echo "  Uploaded: schemas/web_search_tools.json"
-echo "  Uploaded: schemas/check_warranty_tools.json"
-echo
-
-# ── Step 5: Deploy CloudFormation stack ───────────────────
-echo "Step 5/5  Deploying CloudFormation stack '$STACK_NAME'..."
+# ── Step 4: Deploy CloudFormation stack ───────────────────
+# Tool schemas are now inline in the template — no schema upload needed.
+echo "Step 4/4  Deploying CloudFormation stack '$STACK_NAME'..."
 echo "  (First deploy takes ~10 minutes)"
 
 aws cloudformation deploy \
@@ -153,8 +146,6 @@ aws cloudformation deploy \
         AgentCodeKey="agent/deployment.zip" \
         WebSearchLambdaKey="lambda/web_search.zip" \
         CheckWarrantyLambdaKey="lambda/check_warranty.zip" \
-        WebSearchToolSchemaKey="schemas/web_search_tools.json" \
-        CheckWarrantyToolSchemaKey="schemas/check_warranty_tools.json" \
         Environment="$ENVIRONMENT" \
     --tags \
         Project=ShopEasySupport \

@@ -31,16 +31,6 @@ Parameters:
     Default: lambda/check_warranty.zip
     Description: S3 key of the check_warranty Lambda zip.
 
-  WebSearchToolSchemaKey:
-    Type: String
-    Default: schemas/web_search_tools.json
-    Description: S3 key of the web_search MCP tool schema (tools.json).
-
-  CheckWarrantyToolSchemaKey:
-    Type: String
-    Default: schemas/check_warranty_tools.json
-    Description: S3 key of the check_warranty MCP tool schema (tools.json).
-
   ModelId:
     Type: String
     Default: us.anthropic.claude-sonnet-4-20250514-v1:0
@@ -349,6 +339,8 @@ Resources:
         Environment: !Ref Environment
 
   # ── AgentCore GatewayTarget: web_search ──────────────────
+  # Tool schema is inline (InlinePayload) — avoids S3Configuration
+  # S3Configuration uses Uri:"s3://..." not Bucket/Key fields.
   WebSearchGatewayTarget:
     Type: AWS::BedrockAgentCore::GatewayTarget
     DependsOn: CustomerSupportGateway
@@ -361,9 +353,22 @@ Resources:
           Lambda:
             LambdaArn: !GetAtt WebSearchFunction.Arn
             ToolSchema:
-              S3:
-                Bucket: !Ref ArtifactBucket
-                Key: !Ref WebSearchToolSchemaKey
+              InlinePayload:
+                - Name: web_search
+                  Description: >-
+                    Search the web for current information, product reviews, or news
+                    using DuckDuckGo. No API key required.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      query:
+                        Type: string
+                        Description: The search query to look up on the web
+                      max_results:
+                        Type: integer
+                        Description: Maximum number of results to return (default 5)
+                    Required:
+                      - query
 
   # ── AgentCore GatewayTarget: check_warranty ──────────────
   CheckWarrantyGatewayTarget:
@@ -378,9 +383,26 @@ Resources:
           Lambda:
             LambdaArn: !GetAtt CheckWarrantyFunction.Arn
             ToolSchema:
-              S3:
-                Bucket: !Ref ArtifactBucket
-                Key: !Ref CheckWarrantyToolSchemaKey
+              InlinePayload:
+                - Name: check_warranty
+                  Description: >-
+                    Check warranty status, coverage type, expiry date, and remaining
+                    days for a purchased product.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      product_id:
+                        Type: string
+                        Description: The unique product identifier (e.g., PROD-001)
+                      purchase_date:
+                        Type: string
+                        Description: The date of purchase in YYYY-MM-DD format
+                      serial_number:
+                        Type: string
+                        Description: The product serial number (optional)
+                    Required:
+                      - product_id
+                      - purchase_date
 
 # ──────────────────────────────────────────────────────────
 # Outputs
