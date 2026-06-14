@@ -1,0 +1,420 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  ShopEasy Customer Support Agent — AWS Bedrock AgentCore
+  Provisions: AgentCore Runtime (CodeZip), AgentCore Memory (Semantic),
+  AgentCore Gateway (MCP/no-auth), two Lambda-backed Gateway tools,
+  all required IAM roles, and a Runtime Endpoint.
+
+# ──────────────────────────────────────────────────────────
+# Parameters
+# ──────────────────────────────────────────────────────────
+Parameters:
+
+  ArtifactBucket:
+    Type: String
+    Description: >
+      S3 bucket that holds all deployment zips and tool schemas.
+      Created by scripts/package_and_deploy_cfn.sh before stack launch.
+
+  AgentCodeKey:
+    Type: String
+    Default: agent/deployment.zip
+    Description: S3 key of the agent zip (ARM64 dependencies + source).
+
+  WebSearchLambdaKey:
+    Type: String
+    Default: lambda/web_search.zip
+    Description: S3 key of the web_search Lambda zip.
+
+  CheckWarrantyLambdaKey:
+    Type: String
+    Default: lambda/check_warranty.zip
+    Description: S3 key of the check_warranty Lambda zip.
+
+  WebSearchToolSchemaKey:
+    Type: String
+    Default: schemas/web_search_tools.json
+    Description: S3 key of the web_search MCP tool schema (tools.json).
+
+  CheckWarrantyToolSchemaKey:
+    Type: String
+    Default: schemas/check_warranty_tools.json
+    Description: S3 key of the check_warranty MCP tool schema (tools.json).
+
+  ModelId:
+    Type: String
+    Default: us.anthropic.claude-sonnet-4-20250514-v1:0
+    Description: Bedrock model ID used by the Strands agent at runtime.
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment tag.
+
+# ──────────────────────────────────────────────────────────
+# Resources
+# ──────────────────────────────────────────────────────────
+Resources:
+
+  # ── IAM: Lambda execution role ───────────────────────────
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ShopEasy-LambdaToolsRole-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: Project
+          Value: ShopEasySupport
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Allow AgentCore Gateway to invoke the Lambda functions
+  WebSearchGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebSearchFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock-agentcore.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  CheckWarrantyGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CheckWarrantyFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock-agentcore.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  # ── IAM: AgentCore Runtime role ──────────────────────────
+  AgentCoreRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ShopEasy-AgentCoreRuntimeRole-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*
+      Policies:
+        - PolicyName: AgentCoreRuntimePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:InvokeMemory
+                  - bedrock-agentcore:GetMemory
+                  - bedrock-agentcore:CreateMemoryEvent
+                  - bedrock-agentcore:ListMemoryEvents
+                  - bedrock-agentcore:RetrieveMemoryRecords
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:InvokeGateway
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+      Tags:
+        - Key: Project
+          Value: ShopEasySupport
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ── IAM: AgentCore Memory role ───────────────────────────
+  AgentCoreMemoryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ShopEasy-AgentCoreMemoryRole-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: AgentCoreMemoryPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*
+      Tags:
+        - Key: Project
+          Value: ShopEasySupport
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ── IAM: AgentCore Gateway role ──────────────────────────
+  AgentCoreGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ShopEasy-AgentCoreGatewayRole-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: AgentCoreGatewayPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt WebSearchFunction.Arn
+                  - !GetAtt CheckWarrantyFunction.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*
+      Tags:
+        - Key: Project
+          Value: ShopEasySupport
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ── Lambda: Tool 4 — web_search ──────────────────────────
+  WebSearchFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub shopeasy-web-search-${Environment}
+      Description: Tool 4 — web_search via DuckDuckGo for AgentCore Gateway
+      Runtime: python3.12
+      Architectures: [x86_64]
+      Handler: handler.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref WebSearchLambdaKey
+      Tags:
+        - Key: Project
+          Value: ShopEasySupport
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ── Lambda: Tool 5 — check_warranty ──────────────────────
+  CheckWarrantyFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub shopeasy-check-warranty-${Environment}
+      Description: Tool 5 — product warranty lookup for AgentCore Gateway
+      Runtime: python3.12
+      Architectures: [x86_64]
+      Handler: handler.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 15
+      MemorySize: 128
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref CheckWarrantyLambdaKey
+      Tags:
+        - Key: Project
+          Value: ShopEasySupport
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ── AgentCore Memory ─────────────────────────────────────
+  CustomerSupportMemory:
+    Type: AWS::BedrockAgentCore::Memory
+    Properties:
+      Name: CustomerSupportMemory
+      Description: Semantic memory for ShopEasy customer support conversations
+      EventExpiryDuration: 90
+      MemoryExecutionRoleArn: !GetAtt AgentCoreMemoryRole.Arn
+      MemoryStrategies:
+        - SemanticMemoryStrategy:
+            Name: SemanticFacts
+            Description: Extract and store factual information from customer conversations
+      Tags:
+        Project: ShopEasySupport
+        Environment: !Ref Environment
+
+  # ── AgentCore Runtime ─────────────────────────────────────
+  CustomerSupportRuntime:
+    Type: AWS::BedrockAgentCore::Runtime
+    DependsOn:
+      - CustomerSupportMemory
+      - CustomerSupportGateway
+    Properties:
+      AgentRuntimeName: !Sub CustomerSupportAgent-${Environment}
+      Description: ShopEasy customer support Strands agent (CodeZip, ARM64)
+      RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Runtime: PYTHON_3_12
+          EntryPoint:
+            - main.py
+          Code:
+            S3:
+              Bucket: !Ref ArtifactBucket
+              Prefix: !Ref AgentCodeKey
+      LifecycleConfiguration:
+        IdleRuntimeSessionTimeout: 300
+      # Wire up env vars that the AgentCore CLI would inject automatically
+      EnvironmentVariables:
+        MEMORY_CUSTOMERSUPPORTMEMORY_ID: !GetAtt CustomerSupportMemory.MemoryId
+        AGENTCORE_GATEWAY_URL: !GetAtt CustomerSupportGateway.GatewayUrl
+        MODEL_ID: !Ref ModelId
+        AWS_REGION: !Ref AWS::Region
+      Tags:
+        Project: ShopEasySupport
+        Environment: !Ref Environment
+
+  # ── AgentCore Runtime Endpoint ───────────────────────────
+  CustomerSupportEndpoint:
+    Type: AWS::BedrockAgentCore::RuntimeEndpoint
+    DependsOn: CustomerSupportRuntime
+    Properties:
+      Name: !Sub CustomerSupportEndpoint-${Environment}
+      Description: Default serving endpoint for the CustomerSupportAgent
+      AgentRuntimeId: !GetAtt CustomerSupportRuntime.AgentRuntimeId
+      Tags:
+        Project: ShopEasySupport
+        Environment: !Ref Environment
+
+  # ── AgentCore Gateway (MCP, no auth) ─────────────────────
+  CustomerSupportGateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Sub CustomerSupportGateway-${Environment}
+      Description: MCP gateway exposing web_search and check_warranty Lambda tools
+      RoleArn: !GetAtt AgentCoreGatewayRole.Arn
+      AuthorizerType: NONE
+      Tags:
+        Project: ShopEasySupport
+        Environment: !Ref Environment
+
+  # ── AgentCore GatewayTarget: web_search ──────────────────
+  WebSearchGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    DependsOn: CustomerSupportGateway
+    Properties:
+      Name: WebSearchTarget
+      Description: DuckDuckGo web search tool (no API key required)
+      GatewayIdentifier: !GetAtt CustomerSupportGateway.GatewayIdentifier
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt WebSearchFunction.Arn
+            ToolSchema:
+              S3:
+                Bucket: !Ref ArtifactBucket
+                Key: !Ref WebSearchToolSchemaKey
+
+  # ── AgentCore GatewayTarget: check_warranty ──────────────
+  CheckWarrantyGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    DependsOn: CustomerSupportGateway
+    Properties:
+      Name: CheckWarrantyTarget
+      Description: Product warranty status and expiry lookup
+      GatewayIdentifier: !GetAtt CustomerSupportGateway.GatewayIdentifier
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt CheckWarrantyFunction.Arn
+            ToolSchema:
+              S3:
+                Bucket: !Ref ArtifactBucket
+                Key: !Ref CheckWarrantyToolSchemaKey
+
+# ──────────────────────────────────────────────────────────
+# Outputs
+# ──────────────────────────────────────────────────────────
+Outputs:
+
+  RuntimeArn:
+    Description: AgentCore Runtime ARN — use as AGENTCORE_RUNTIME_ARN for Streamlit
+    Value: !GetAtt CustomerSupportRuntime.AgentRuntimeArn
+    Export:
+      Name: !Sub ${AWS::StackName}-RuntimeArn
+
+  RuntimeEndpointArn:
+    Description: AgentCore Runtime Endpoint ARN
+    Value: !GetAtt CustomerSupportEndpoint.AgentRuntimeEndpointArn
+    Export:
+      Name: !Sub ${AWS::StackName}-RuntimeEndpointArn
+
+  GatewayUrl:
+    Description: MCP Gateway URL (auto-injected as AGENTCORE_GATEWAY_URL)
+    Value: !GetAtt CustomerSupportGateway.GatewayUrl
+    Export:
+      Name: !Sub ${AWS::StackName}-GatewayUrl
+
+  MemoryId:
+    Description: AgentCore Memory ID (auto-injected as MEMORY_CUSTOMERSUPPORTMEMORY_ID)
+    Value: !GetAtt CustomerSupportMemory.MemoryId
+    Export:
+      Name: !Sub ${AWS::StackName}-MemoryId
+
+  WebSearchFunctionArn:
+    Description: web_search Lambda ARN
+    Value: !GetAtt WebSearchFunction.Arn
+
+  CheckWarrantyFunctionArn:
+    Description: check_warranty Lambda ARN
+    Value: !GetAtt CheckWarrantyFunction.Arn

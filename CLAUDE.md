@@ -19,33 +19,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Install agent dependencies (inside app/CustomerSupportAgent/)
+# Install agent dependencies
 pip install -e "app/CustomerSupportAgent"
 
-# Run agent locally (requires Node.js + AgentCore CLI)
-agentcore dev                          # starts server on http://localhost:8080
-agentcore dev "What is the return policy for electronics?"  # quick test
+# ── Option A: CloudFormation (recommended for production) ──
+# Packages all artifacts, uploads to S3, deploys the CFN stack
+bash scripts/package_and_deploy_cfn.sh
 
-# Deploy everything (Lambdas + Runtime + Memory + Gateway)
-bash scripts/deploy.sh
+# Update the stack after code changes (re-run the same script)
+bash scripts/package_and_deploy_cfn.sh
 
-# Re-deploy agent code after changes
-agentcore deploy
+# Tear down
+aws cloudformation delete-stack --stack-name shopeasy-customer-support-agent
 
-# Deploy only the Lambda functions
-python infrastructure/deploy_lambdas.py
+# ── Option B: AgentCore CLI ────────────────────────────────
+# Requires Node.js + npm install -g @aws/agentcore
+agentcore dev                    # local dev server on :8080
+bash scripts/deploy.sh           # full deploy via CLI
+agentcore deploy                 # re-deploy after code changes
+agentcore invoke "Hello"         # quick test
+agentcore logs / agentcore traces list / agentcore status
 
-# Run Streamlit frontend
-export AGENTCORE_RUNTIME_ARN=<arn from agentcore status>
+# ── Streamlit frontend (both options) ─────────────────────
+export AGENTCORE_RUNTIME_ARN=<arn from CFN output or agentcore status>
+pip install -r streamlit_app/requirements.txt
 streamlit run streamlit_app/app.py
-
-# Invoke deployed agent from CLI
-agentcore invoke "Check warranty for PROD-001 purchased 2025-01-10"
-
-# View logs / traces
-agentcore logs
-agentcore traces list
-agentcore status
 ```
 
 ## Architecture
