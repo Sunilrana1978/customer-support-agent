@@ -348,6 +348,8 @@ Resources:
       Name: WebSearchTarget
       Description: DuckDuckGo web search tool (no API key required)
       GatewayIdentifier: !GetAtt CustomerSupportGateway.GatewayIdentifier
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
       TargetConfiguration:
         Mcp:
           Lambda:
@@ -378,6 +380,8 @@ Resources:
       Name: CheckWarrantyTarget
       Description: Product warranty status and expiry lookup
       GatewayIdentifier: !GetAtt CustomerSupportGateway.GatewayIdentifier
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
       TargetConfiguration:
         Mcp:
           Lambda:

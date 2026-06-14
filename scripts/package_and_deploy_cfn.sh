@@ -60,7 +60,7 @@ mkdir -p "$AGENT_BUILD_DIR/memory"
 cp app/CustomerSupportAgent/memory/__init__.py "$AGENT_BUILD_DIR/memory/"
 cp app/CustomerSupportAgent/memory/session.py  "$AGENT_BUILD_DIR/memory/"
 
-# Install ARM64-compatible dependencies
+# Install ARM64-compatible dependencies (--no-compile prevents local .pyc generation)
 echo "  Installing ARM64 dependencies (this may take a few minutes)..."
 pip install \
     --platform manylinux2014_aarch64 \
@@ -68,6 +68,7 @@ pip install \
     --implementation cp \
     --target "$AGENT_BUILD_DIR" \
     --only-binary :all: \
+    --no-compile \
     --quiet \
     bedrock-agentcore \
     strands-agents \
@@ -77,14 +78,20 @@ pip install \
         echo "  Falling back to standard pip install (may not be ARM64 compatible)."
         pip install \
             --target "$AGENT_BUILD_DIR" \
+            --no-compile \
             --quiet \
             bedrock-agentcore strands-agents boto3 mcp
     }
 
-# Zip the agent package
+# Zip the agent package (exclude Python cache to avoid runtime incompatibility)
 AGENT_ZIP="$(pwd)/.build/agent_deployment.zip"
 mkdir -p "$(pwd)/.build"
-(cd "$AGENT_BUILD_DIR" && zip -r "$AGENT_ZIP" . -q)
+# Remove all bytecode cache — use zip exclusion as belt-and-suspenders
+(cd "$AGENT_BUILD_DIR" && zip -r "$AGENT_ZIP" . \
+    --exclude "*.pyc" \
+    --exclude "*/__pycache__/*" \
+    --exclude "*/__pycache__" \
+    -q)
 echo "  Agent zip: $AGENT_ZIP ($(du -sh "$AGENT_ZIP" | cut -f1))"
 
 # Upload
