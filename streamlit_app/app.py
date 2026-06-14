@@ -9,6 +9,7 @@ Usage:
 
 import json
 import os
+import uuid
 from datetime import datetime
 
 import boto3
@@ -85,7 +86,7 @@ def main():
 
         st.divider()
         if st.button("New Conversation", use_container_width=True):
-            st.session_state.session_id = f"{user_id}-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+            st.session_state.session_id = f"{user_id}-{uuid.uuid4().hex}"
             st.session_state.messages = []
             st.rerun()
 
@@ -110,7 +111,7 @@ def main():
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "session_id" not in st.session_state:
-        st.session_state.session_id = f"{user_id}-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+        st.session_state.session_id = f"{user_id}-{uuid.uuid4().hex}"
 
     # ── Main chat area ───────────────────────────────────────
     st.title("Customer Support")
