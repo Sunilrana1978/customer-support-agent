@@ -288,7 +288,7 @@ Resources:
       - CustomerSupportMemory
       - CustomerSupportGateway
     Properties:
-      AgentRuntimeName: !Sub CustomerSupportAgent-${Environment}
+      AgentRuntimeName: !Sub CustomerSupportAgent_${Environment}
       Description: ShopEasy customer support Strands agent (CodeZip, ARM64)
       RoleArn: !GetAtt AgentCoreRuntimeRole.Arn
       NetworkConfiguration:
@@ -319,7 +319,7 @@ Resources:
     Type: AWS::BedrockAgentCore::RuntimeEndpoint
     DependsOn: CustomerSupportRuntime
     Properties:
-      Name: !Sub CustomerSupportEndpoint-${Environment}
+      Name: !Sub CustomerSupportEndpoint_${Environment}
       Description: Default serving endpoint for the CustomerSupportAgent
       AgentRuntimeId: !GetAtt CustomerSupportRuntime.AgentRuntimeId
       Tags:
