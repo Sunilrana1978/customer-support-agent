@@ -4,97 +4,89 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an **AWS Bedrock Shopping Customer Support Agent** — a spec-driven project that is not yet implemented. The full implementation plan lives in `SHOPPING_SUPPORT_AGENT_IMPLEMENTATION_GUIDE.md`. Code should be built according to that spec.
+**ShopEasy Customer Support Agent** — deployed on **AWS Bedrock AgentCore** using the [Strands Agents](https://strandsagents.com) framework. A Streamlit app is the frontend. The agent is live (not spec-only).
 
 ## Technology Stack
 
-- **Python 3.11+** with Pydantic v2 for data models
-- **AWS Bedrock** (Claude model) as the agent runtime
-- **DynamoDB** for customer data, order history, and conversation memory (session TTL: 90 days)
-- **AWS Lambda** for tool execution (invoked by Bedrock as action groups)
-- **API Gateway** as the HTTP entry point
-- **CloudWatch** for metrics and monitoring (`ShoppingSupport` namespace)
-
-## Intended Project Structure
-
-```
-shopping-support-agent/
-├── infrastructure/         # DynamoDB table creation, CloudFormation, IAM roles
-├── src/
-│   ├── agent/              # Main agent client (client.py) and config
-│   ├── tools/              # Lambda-backed tools (customer, order, refund, shipping)
-│   ├── models/             # Pydantic models (customer, order, session)
-│   ├── evaluations/        # CloudWatch metrics and performance analytics
-│   └── integrations/       # DynamoDB and Bedrock client wrappers
-├── tests/
-│   ├── unit/               # Tool and model tests using moto mock_dynamodb
-│   ├── integration/        # DynamoDB integration tests
-│   └── e2e/                # Full conversation flow tests
-└── deployment/             # Lambda packaging and deploy scripts
-```
+- **AWS Bedrock AgentCore Runtime** — managed hosting for the Strands agent (`bedrock-agentcore` Python SDK)
+- **Strands Agents** (`strands-agents`) — agent framework; tools decorated with `@tool`, agent created with `Agent(...)`
+- **AgentCore Memory** — per-user semantic memory via `AgentCoreMemorySessionManager`
+- **AgentCore Gateway** — MCP server that proxies Lambda-backed tools (Tools 4 & 5) to the agent
+- **AWS Lambda** — two functions (`agentcore-web-search`, `agentcore-check-warranty`) backing Gateway tools
+- **Streamlit** — chat UI that calls `bedrock-agentcore:invoke_agent_runtime` directly via boto3
+- **AgentCore CLI** (`@aws/agentcore` npm package) — used for deploy, not runtime
 
 ## Commands
 
-Once the code is scaffolded (per the spec):
-
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install agent dependencies (inside app/CustomerSupportAgent/)
+pip install -e "app/CustomerSupportAgent"
 
-# Install package in editable mode
-pip install -e .
+# Run agent locally (requires Node.js + AgentCore CLI)
+agentcore dev                          # starts server on http://localhost:8080
+agentcore dev "What is the return policy for electronics?"  # quick test
 
-# Run all tests
-pytest
+# Deploy everything (Lambdas + Runtime + Memory + Gateway)
+bash scripts/deploy.sh
 
-# Run a single test file
-pytest tests/unit/test_customer_tools.py -v
+# Re-deploy agent code after changes
+agentcore deploy
 
-# Run with coverage
-pytest --cov=src --cov-report=term-missing
+# Deploy only the Lambda functions
+python infrastructure/deploy_lambdas.py
 
-# Package Lambda function
-bash deployment/package_lambda.sh
+# Run Streamlit frontend
+export AGENTCORE_RUNTIME_ARN=<arn from agentcore status>
+streamlit run streamlit_app/app.py
 
-# Set up DynamoDB tables
-python infrastructure/dynamodb_tables.py
+# Invoke deployed agent from CLI
+agentcore invoke "Check warranty for PROD-001 purchased 2025-01-10"
 
-# Deploy Lambda
-AWS_ACCOUNT_ID=<id> bash deployment/deploy.sh
+# View logs / traces
+agentcore logs
+agentcore traces list
+agentcore status
 ```
 
 ## Architecture
 
-The system follows a layered design where **Bedrock Agent** acts as the orchestrator:
+```
+User → Streamlit (streamlit_app/app.py)
+           │  boto3: invoke_agent_runtime
+           ▼
+    AgentCore Runtime
+    app/CustomerSupportAgent/main.py  (@app.entrypoint)
+           │
+    Strands Agent
+           ├── Tool 1: get_return_policy      ─┐
+           ├── Tool 2: get_product_info         ├ tools.py (in-process)
+           ├── Tool 3: get_technical_support   ─┘
+           │
+           ├── AgentCore Memory (session.py)
+           │   AgentCoreMemorySessionManager — semantic strategy
+           │   env: MEMORY_CUSTOMERSUPPORTMEMORY_ID (auto-injected by AgentCore)
+           │
+           └── AgentCore Gateway (MCP, no-auth)
+               env: AGENTCORE_GATEWAY_URL (auto-injected by AgentCore)
+                   ├── Tool 4: web_search   → lambda/web_search/handler.py   (DuckDuckGo)
+                   └── Tool 5: check_warranty → lambda/check_warranty/handler.py
+```
 
-1. **API Gateway** receives `POST /invoke-agent` with `{session_id, customer_id, message}`
-2. **`ShoppingCustomerSupportAgent.invoke_agent()`** (in `src/agent/client.py`) orchestrates:
-   - Fetches customer identity (VIP status, lifetime value) from DynamoDB
-   - Retrieves prior conversation from `shopping-agent-sessions` DynamoDB table (memory)
-   - Injects customer context into the Bedrock session state
-   - Calls `bedrock_agent_runtime.invoke_agent()` which triggers Lambda tools as needed
-   - Persists updated conversation back to DynamoDB
-   - Emits CloudWatch metrics to `ShoppingSupport` namespace
-3. **Lambda tools** are action groups registered with the Bedrock agent:
-   - `customer_tools`: `get_customer_profile`, `update_customer_vip_status`
-   - `order_tools`: `get_order_status`, `get_recent_orders`
-   - `refund_tools`: `check_return_policy`, `process_refund`
+### Key data flows
 
-## DynamoDB Tables
+- **Memory**: `AgentCoreMemorySessionManager` is passed as `session_manager=` to `Agent(...)`. AgentCore injects `MEMORY_CUSTOMERSUPPORTMEMORY_ID` at runtime. If absent (local dev), memory is silently skipped.
+- **Gateway tools**: `MCPClient(lambda: streamablehttp_client(GATEWAY_URL))` is opened as a context manager; `list_tools_sync()` returns the Lambda-backed tools as Strands tool objects, appended to `DIRECT_TOOLS`. If `AGENTCORE_GATEWAY_URL` is unset (local dev), only the 3 direct tools are available.
+- **Payload contract**: `invoke_agent_runtime` sends `{"prompt": "...", "session_id": "...", "user_id": "..."}`. The `context.session_id` from AgentCore Runtime takes precedence over `payload["session_id"]`.
 
-| Table | PK | SK | Notes |
-|---|---|---|---|
-| `shopping-customers` | `customer_id` | — | GSI on `email` |
-| `shopping-orders` | `customer_id` | `order_id` | GSI on `order_date` |
-| `shopping-returns` | `return_id` | — | TTL 90 days; GSI on `order_id` |
-| `shopping-agent-sessions` | `session_id` | `timestamp` | TTL 90 days |
+## Deployment Config
 
-All tables use `PAY_PER_REQUEST` billing.
+`agentcore/agentcore.json` declares the Runtime, Memory, and Gateway. `agentcore/aws-targets.json` sets the AWS account and region (`us-west-2`). After `agentcore deploy`, the CLI provisions everything via CDK and injects environment variables into the Runtime automatically.
+
+Lambda `tools.json` files (e.g. `lambda/web_search/tools.json`) are the MCP tool schemas registered with the Gateway via `agentcore add gateway-target --tool-schema-file`.
 
 ## Key Design Decisions
 
-- **VIP policy**: Regular customers get 30-day returns; Silver/Gold/Platinum get 60 days.
-- **Session memory**: Stored as a `conversation` list in DynamoDB, retrieved on each `invoke_agent` call and re-injected into Bedrock session state.
-- **Tool responses**: All tools return `{'success': bool, ...}` dicts — never raise exceptions to callers.
-- **Tests use moto**: `@mock_dynamodb` decorator from `moto` library mocks AWS calls in unit/integration tests. Do not use real AWS in tests.
-- **AWS region**: `us-west-2` for Bedrock and CloudWatch; tests should specify `us-east-1` when creating moto mock tables to match boto3 defaults.
+- **No Cognito auth**: Gateway uses `authorizerType: NONE`. The Runtime is IAM-secured (only callers with `bedrock-agentcore:InvokeAgentRuntime` can call it).
+- **Model override**: Pass `"model_id"` in the invoke payload to use a different Bedrock model per request.
+- **Lambda packaging**: `infrastructure/deploy_lambdas.py` installs deps into a temp dir and zips for `python3.12` (x86_64). The `duckduckgo-search` dep is needed only for `web_search`; `check_warranty` uses stdlib only.
+- **Tool responses never raise**: Lambda handlers and direct tools return `{"error": "..."}` dicts on failure instead of raising exceptions.
