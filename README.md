@@ -201,6 +201,115 @@ agentcore deploy
 agentcore status
 ```
 
+## Testing the Deployed Agent
+
+### How to invoke
+
+**Option A — boto3 (works with both CFN and CLI deployments)**
+
+```bash
+export AGENTCORE_RUNTIME_ARN=<arn from deployment output>
+
+python3 - <<'EOF'
+import boto3, json
+
+client = boto3.client("bedrock-agentcore", region_name="us-west-2")
+response = client.invoke_agent_runtime(
+    agentRuntimeArn="<AGENTCORE_RUNTIME_ARN>",
+    runtimeSessionId="test-session-001",
+    payload=json.dumps({
+        "prompt": "What is the return policy for electronics?",
+        "session_id": "test-session-001",
+        "user_id": "tester-001",
+    }).encode(),
+    qualifier="DEFAULT",
+)
+chunks = [c["chunk"]["bytes"].decode() for c in response["response"] if "chunk" in c]
+print(json.loads("".join(chunks))["result"])
+EOF
+```
+
+**Option B — AgentCore CLI (CLI deployment only)**
+
+```bash
+agentcore invoke "What is the return policy for electronics?"
+```
+
+**Option C — Streamlit UI**
+
+```bash
+streamlit run streamlit_app/app.py
+```
+
+---
+
+### Test prompts
+
+#### Tool 1 · `get_return_policy`
+
+| Prompt | What to verify |
+|---|---|
+| `What is the return policy for electronics?` | 30-day window, original packaging required |
+| `Can I return a sofa I bought 10 days ago?` | 14-day window for furniture |
+| `I bought a jacket 3 weeks ago — can I return it?` | 60-day window for clothing |
+| `Is a Kindle e-reader refundable?` | Digital books excluded, 30-day window for books |
+
+#### Tool 2 · `get_product_info`
+
+| Prompt | What to verify |
+|---|---|
+| `Tell me about product PROD-001` | Wireless headphones, $79.99, in stock |
+| `What are the specs for PROD-002?` | Smart Watch, AMOLED display, 7-day battery |
+| `Is PROD-003 available to buy?` | Out of stock, restock date returned |
+| `What products do you carry?` | Agent lists PROD-001, PROD-002, PROD-003 |
+
+#### Tool 3 · `get_technical_support`
+
+| Prompt | What to verify |
+|---|---|
+| `My PROD-001 headphones won't pair with my phone` | Bluetooth troubleshooting steps + ticket ID |
+| `The battery on my PROD-002 watch drains in a few hours` | Battery calibration steps + ticket ID |
+| `The screen on my smartwatch keeps flickering` | Display troubleshooting steps |
+| `The microphone on my headphones isn't working` | Audio troubleshooting steps |
+
+#### Tool 4 · `check_warranty` — Gateway → Lambda
+
+| Prompt | What to verify |
+|---|---|
+| `Check warranty for PROD-001, purchased 2024-01-15` | 24-month warranty, active, days remaining shown |
+| `Is PROD-002 still under warranty? I bought it on 2023-06-01` | 12-month warranty, likely expired |
+| `Check warranty for PROD-003 bought on 2024-12-01` | 36-month structural warranty, active |
+| `Warranty check: product PROD-999, bought 2024-01-01` | Unknown product error handled gracefully |
+
+#### Tool 5 · `web_search` — Gateway → Lambda
+
+| Prompt | What to verify |
+|---|---|
+| `Search for the best wireless headphones under $100 in 2025` | DuckDuckGo results returned with titles + snippets |
+| `What are customers saying about noise-canceling headphones?` | Real-time web results |
+| `Find recent reviews of smartwatches with health tracking` | Multiple results with URLs |
+
+#### Memory — multi-turn conversation
+
+Run these prompts in sequence **using the same `session_id`** to verify session memory:
+
+```
+Turn 1: "Hi, my name is Alex and I recently bought wireless headphones."
+Turn 2: "They won't connect to my laptop."
+Turn 3: "What was the issue I mentioned earlier?"   ← agent should recall from memory
+Turn 4: "What's the return window if I decide to send them back?"
+```
+
+#### Edge cases
+
+| Prompt | Expected behaviour |
+|---|---|
+| `Tell me about product PROD-999` | Graceful error + lists valid product IDs |
+| `Hello` | Friendly greeting, offers help |
+| `What can you help me with?` | Lists all 5 capabilities |
+
+---
+
 ## Local Development (without AWS)
 
 To iterate on the agent logic without a full cloud deployment:
