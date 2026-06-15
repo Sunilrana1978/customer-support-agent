@@ -43,11 +43,35 @@ User → Streamlit App → AgentCore Runtime (Strands Agent)
 | 4 | `web_search` | Gateway → Lambda | DuckDuckGo |
 | 5 | `check_warranty` | Gateway → Lambda | Mock warranty DB |
 
+## Quickstart (local setup)
+
+```bash
+# 1. Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Create virtual environment and install all dependencies
+uv venv --python 3.11
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+uv pip install -r requirements.txt
+
+# 3. Configure AWS credentials
+aws configure
+
+# 4. Run the Streamlit app (after deploying — see Deployment below)
+export AGENTCORE_RUNTIME_ARN=<arn from deployment output>
+streamlit run streamlit_app/app.py
+```
+
+> **Regenerate the architecture diagram** (optional):
+> ```bash
+> python docs/generate_diagram.py
+> ```
+
 ## Prerequisites
 
 - AWS account with **Bedrock model access** enabled (`us.amazon.nova-lite-v1:0` in us-west-2)
 - **AWS CLI** configured (`aws configure`)
-- **Python 3.11+**
+- **Python 3.11+** with [uv](https://docs.astral.sh/uv/) for dependency management
 - **Node.js 20+** — only required for the AgentCore CLI (Option B)
 
 ## Project Structure
