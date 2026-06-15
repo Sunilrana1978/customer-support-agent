@@ -43,36 +43,75 @@ User → Streamlit App → AgentCore Runtime (Strands Agent)
 | 4 | `web_search` | Gateway → Lambda | DuckDuckGo |
 | 5 | `check_warranty` | Gateway → Lambda | Mock warranty DB |
 
-## Quickstart (local setup)
+## Getting Started
+
+### 1. Prerequisites
+
+Make sure the following are installed before you begin:
+
+| Tool | Version | Notes |
+|---|---|---|
+| Python | 3.11+ | |
+| [uv](https://docs.astral.sh/uv/) | latest | Python package manager |
+| AWS CLI | v2 | [Install guide](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) |
+| Node.js | 20+ | Only for Option B (AgentCore CLI) |
+
+You also need:
+- An **AWS account** with Bedrock model access enabled for `us.amazon.nova-lite-v1:0` in `us-west-2`
+- AWS credentials configured (`aws configure` or IAM role)
+
+### 2. Clone the repository
 
 ```bash
-# 1. Install uv (if not already installed)
+git clone https://github.com/Sunilrana1978/customer-support-agent.git
+cd customer-support-agent
+```
+
+### 3. Set up the Python environment
+
+```bash
+# Install uv (skip if already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Create virtual environment and install all dependencies
+# Create a virtual environment with Python 3.11
 uv venv --python 3.11
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+# Activate it
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\activate         # Windows
+
+# Install all dependencies
 uv pip install -r requirements.txt
+```
 
-# 3. Configure AWS credentials
+### 4. Configure AWS credentials
+
+```bash
 aws configure
+# Prompts for: AWS Access Key ID, Secret Access Key, region (us-west-2), output format
+```
 
-# 4. Run the Streamlit app (after deploying — see Deployment below)
-export AGENTCORE_RUNTIME_ARN=<arn from deployment output>
+Verify access:
+
+```bash
+aws sts get-caller-identity
+aws bedrock list-foundation-models --region us-west-2 --query 'modelSummaries[?modelId==`amazon.nova-lite-v1:0`]'
+```
+
+### 5. Deploy to AWS
+
+See the [Deployment](#deployment) section below. Once deployed, the script prints a `RuntimeArn`.
+
+### 6. Run the Streamlit app
+
+```bash
+export AGENTCORE_RUNTIME_ARN=<RuntimeArn from deployment output>
 streamlit run streamlit_app/app.py
 ```
 
-> **Regenerate the architecture diagram** (optional):
-> ```bash
-> python docs/generate_diagram.py
-> ```
+Open [http://localhost:8501](http://localhost:8501) in your browser.
 
-## Prerequisites
-
-- AWS account with **Bedrock model access** enabled (`us.amazon.nova-lite-v1:0` in us-west-2)
-- **AWS CLI** configured (`aws configure`)
-- **Python 3.11+** with [uv](https://docs.astral.sh/uv/) for dependency management
-- **Node.js 20+** — only required for the AgentCore CLI (Option B)
+---
 
 ## Project Structure
 
@@ -162,31 +201,15 @@ agentcore deploy
 agentcore status
 ```
 
-## Running the Streamlit App
-
-```bash
-# Install dependencies
-pip install -r streamlit_app/requirements.txt
-
-# Set the Runtime ARN (from CFN outputs or agentcore status)
-export AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:<account>:runtime/<id>
-
-# Launch the app
-streamlit run streamlit_app/app.py
-```
-
-Open http://localhost:8501 in your browser.
-
 ## Local Development (without AWS)
 
-```bash
-# Install agent dependencies
-pip install -e "app/CustomerSupportAgent"
+To iterate on the agent logic without a full cloud deployment:
 
-# Start local dev server (requires AgentCore CLI)
+```bash
+# Start local dev server on :8080 (requires AgentCore CLI)
 agentcore dev
 
-# Test in another terminal
+# In a second terminal, send a test request
 curl -X POST http://localhost:8080/invocations \
   -H "Content-Type: application/json" \
   -d '{"prompt": "What is the return policy for electronics?"}'
